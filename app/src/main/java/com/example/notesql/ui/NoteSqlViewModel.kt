@@ -2,6 +2,7 @@ package com.example.notesql.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -27,32 +28,57 @@ sealed interface NoteSqlUiState {
     data class NoteEdit(val note: Note) : NoteSqlUiState
 }
 
-data class NoteSqlThemeState(
-    // Null when no override is active
-    val darkModeOverride: Boolean?
-)
-
 class NoteSqlViewModel(
     private val preferencesRepository: PreferencesRepository,
     private val notesRepository: NotesRepository
 ) : ViewModel() {
     // this is hideous
-    val themeState: StateFlow<NoteSqlThemeState> =
+    val themeOverride: StateFlow<Boolean?> =
         preferencesRepository.darkModeOverride.map { darkModeOverride ->
-            NoteSqlThemeState(darkModeOverride)
+            darkModeOverride
         }.stateIn(scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = runBlocking {
-                NoteSqlThemeState(
-                    preferencesRepository.darkModeOverride.first()
-                )
+                preferencesRepository.darkModeOverride.first()
+            }
+        )
+    val notesList: StateFlow<List<Note>> =
+        notesRepository.getAllNotesStream().map {
+            notesStream -> notesStream
+        }.stateIn(scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = runBlocking {
+                notesRepository.getAllNotesStream().first()
             }
         )
     // THE CURSED IMPORT RETURNS
-    val uiState: NoteSqlUiState by mutableStateOf(NoteList)
+    var uiState: NoteSqlUiState by mutableStateOf(NoteList)
+        private set
 
-    val settings: PreferencesRepository = preferencesRepository
     val notes: NotesRepository = notesRepository
+
+    // State control functions
+    fun openNoteEdit(note: Note) {
+        uiState = NoteEdit(note)
+    }
+    fun openNoteAdd() {
+        uiState = NoteAdd
+    }
+    fun closeNoteDialog() {
+        uiState = NoteList
+    }
+
+    fun overrideTheme(override: Boolean) {
+        // If it's not runBlocking then it won't update the theme right
+        runBlocking {
+            preferencesRepository.saveDarkModePreference(override)
+        }
+    }
+    fun resetThemeOverride() {
+        runBlocking {
+            preferencesRepository.resetDarkModeOverride()
+        }
+    }
 
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
